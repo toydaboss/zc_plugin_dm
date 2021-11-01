@@ -11,13 +11,8 @@ import {
   GET_ROOM_MESSAGES,
   CREATE_ROOM_MESSAGES,
   DELETE_ROOM_MESSAGE,
-<<<<<<< HEAD
-  POST_ROOM_MEDIA
-} from "./actionTypes";
-=======
   ADD_PEOPLE_TO_ROOM,
 } from './actionTypes';
->>>>>>> b81a265973f405812da2adceb6aea39bc67f8ca0
 
 // Create Room
 const createRoom = (room_id) => ({
@@ -179,7 +174,6 @@ export const handleAddPeopleToRoom =({org_id, room_id}) => async (dispatch) => {
     }
   };
 
-<<<<<<< HEAD
 export const handleDeleteRoomMessage = (org_id, room_id, message_id) => async (dispatch) => {
   try {
     const { data } = await APIService.deleteMessage(org_id, room_id, message_id);
@@ -204,5 +198,3 @@ export const handlePostRoomMedia = (org_id, room_id, data)=>async(dispatch)=>{
     console.log(`Error from handlePostRoomMedia: ${error}`)
   }
 }
-=======
->>>>>>> b81a265973f405812da2adceb6aea39bc67f8ca0
