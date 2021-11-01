@@ -14,11 +14,12 @@ venv/
 *.pot
 *.pyc
 *__pycache__
+database.sqlite
+.coverage
 
 *.idea
 
-*Pipfile.lock
-Pipfile.lock
+Pipfile*
 # *media
 *.DS_Store
 /.vscode

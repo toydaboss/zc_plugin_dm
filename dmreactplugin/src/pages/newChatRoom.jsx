@@ -1,76 +1,133 @@
-import React, { useEffect, useState, useRef } from 'react'
-import DmProfileHeader from '../components/dmProfileHeader'
-import BookmarkHeader from '../components/common/addBookmarkKebab/dmBookMark'
-import DmChatContainerBox from '../components/ChatContainer/dmChatContainerBox'
-import InputBoxField from '../components/dmBoxInputField'
-import PinnedMessage from '../components/common/pinnedMessage/dmPinnedMessages'
-import { useDispatch } from 'react-redux'
+import moment from 'moment';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
+import { MessageBoard } from '@zuri/zuri-ui';
+import { SubscribeToChannel } from '@zuri/utilities';
+
+import './newChatRoom.css';
+import DmProfileHeader from '../components/dmProfileHeader';
+import BookmarkHeader from '../components/common/addBookmarkKebab/dmBookMark';
+import PinnedMessage from '../components/common/pinnedMessage/dmPinnedMessages';
+import ProfileSidebar from '../components/profileSidebar/profileSidebar';
 import {
   handleGetRoomInfo,
   handleGetRoomMessages,
-} from '../Redux/Actions/dmActions'
-import { useSelector } from 'react-redux'
-import './newChatRoom.css'
-import ProfileSidebar from '../components/profileSidebar/profileSidebar'
+  handleCreateRoomMessages,
+} from '../Redux/Actions/dmActions';
 
 // Chat Home Page
-const ChatHome = ({ org_id, loggedInUser_id, room_id }) => {
-  const roomsReducer = useSelector(({ roomsReducer }) => roomsReducer)
-  const membersReducer = useSelector(({ membersReducer }) => membersReducer)
-  const { room_messages } = useSelector(({ roomsReducer }) => roomsReducer)
+const ChatHome = () => {
+  const { room_id } = useParams({});
+  const dispatch = useDispatch();
 
-  const user2_id =
-    roomsReducer?.room_info?.room_user_ids !== undefined &&
-    roomsReducer?.room_info?.room_user_ids[1]
-  const messages = room_messages?.results
-
-  const dispatch = useDispatch()
+  const authReducer = useSelector(({ authReducer }) => authReducer);
+  const roomsReducer = useSelector(({ roomsReducer }) => roomsReducer);
+  const membersReducer = useSelector(({ membersReducer }) => membersReducer);
 
   useEffect(() => {
-    dispatch(handleGetRoomMessages(org_id, room_id))
-    dispatch(handleGetRoomInfo(org_id, room_id))
-  }, [dispatch, org_id, loggedInUser_id, room_id])
+    dispatch(handleGetRoomMessages(authReducer.organisation, room_id));
+    dispatch(handleGetRoomMessages(authReducer.organisation, room_id));
+    dispatch(handleGetRoomInfo(authReducer.organisation, room_id));
+    SubscribeToChannel(room_id, (ctx) => {
+      switch (ctx.data.event) {
+        case 'message_create':
+          dispatch(handleGetRoomMessages(authReducer.organisation, room_id));
+          break;
 
-  const actualUser = membersReducer?.find((member) => member._id === user2_id)
+        default:
+          console.log(ctx);
+          break;
+      }
+    });
+  }, []);
 
-  const [grid, setGrid] = useState('')
-  const [none, setNone] = useState('none')
+  const currentUser = membersReducer.members?.find(
+    (member) => member._id === authReducer.user._id
+  );
+  useEffect(() => {}), [];
+
+  const chatSidebarConfig = {
+    chatHeader: 'Chats',
+    showChatSideBar: true,
+    sendChatMessageHandler: (msg) => {
+      dispatch(
+        handleCreateRoomMessages(authReducer.organisation, room_id, {
+          sender_id: authReducer.user._id,
+          room_id,
+          message: msg.richUiData.blocks[0].text,
+        })
+      );
+    },
+    currentUserData: {
+      username: currentUser?.user_name || 'John Doe',
+      imageUrl: '',
+    },
+    messages: roomsReducer.room_messages?.results
+      .map((message) => {
+        return {
+          username: currentUser?.user_name || 'John Doe',
+          id: message.id,
+          time: moment(message.created_at).format('hh:mm A'),
+          imageUrl: '',
+          emojis: [],
+          richUiData: {
+            blocks: [
+              {
+                data: {},
+                depth: 0,
+                entityRanges: [],
+                inlineStyleRanges: [],
+                key: '543og',
+                text: message.message,
+                type: 'unstyled',
+              },
+            ],
+            entityMap: {},
+          },
+        };
+      })
+      .reverse(),
+  };
+
+  const user2_id =
+    roomsReducer.room_info?.room_user_ids !== undefined &&
+    roomsReducer.room_info?.room_user_ids[1];
+
+  const actualUser = membersReducer.members?.find(
+    (member) => member._id === user2_id
+  );
+
+  const [grid, setGrid] = useState('');
+  const [none, setNone] = useState('none');
 
   return (
-    <div className='dm-plugin-full-page' style={{ display: grid }}>
-      <div className='dm-newchat-room'>
-        <div className='dm-chatroom-header'>
-          <DmProfileHeader
-            user2_id={user2_id}
-            actualUser={actualUser}
-            none={none}
-            setNone={setNone}
-            grid={grid}
-            setGrid={setGrid}
-          />
-          <div className='dm-bookmark-head'>
-            <div className='add-bookmark gap-2 d-flex flex-direction-column flex-flow align-items-center px-3 py-1'>
+    <div className="dm-plugin-full-page" style={{ display: grid }}>
+      <div className="dm-newchat-room">
+        <div className="dm-chatroom-header">
+          {/* <DmProfileHeader
+						user2_id={user2_id}
+						actualUser={actualUser}
+						none={none}
+						setNone={setNone}
+						grid={grid}
+						setGrid={setGrid}
+					/> */}
+          <div className="dm-bookmark-head">
+            <div className="add-bookmark gap-2 d-flex flex-direction-column flex-flow align-items-center px-3 py-1">
               <PinnedMessage room_id={room_id} actualUser={actualUser} />
               <BookmarkHeader />
             </div>
           </div>
         </div>
-        <div className='dm-message-in-out-box w-100 position-relative row align-items-end'>
-          <DmChatContainerBox
-            user2_id={user2_id}
-            room_id={room_id}
-            actualUser={actualUser}
-          />
+        <div className="dm-message-in-out-box w-100 h-100 position-relative row align-items-end">
+          {roomsReducer.room_messages && membersReducer.members && (
+            <MessageBoard chatsConfig={chatSidebarConfig} />
+          )}
         </div>
-        <div className='dm-footer-input-field w-100 position-relative'>
-          <InputBoxField
-            org_id={org_id}
-            room_id={room_id}
-            loggedInUser_id={loggedInUser_id}
-          />
-        </div>
+        <div className="dm-footer-input-field w-100 position-relative"></div>
       </div>
-      <div className='dm-plugin-right-sidebar' style={{ display: none }}>
+      <div className="dm-plugin-right-sidebar" style={{ display: none }}>
         <ProfileSidebar
           none={none}
           setNone={setNone}
@@ -80,6 +137,6 @@ const ChatHome = ({ org_id, loggedInUser_id, room_id }) => {
         />
       </div>
     </div>
-  )
-}
-export default ChatHome
+  );
+};
+export default ChatHome;

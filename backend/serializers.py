@@ -157,3 +157,16 @@ class ScheduleMessageSerializer(serializers.Serializer):
         if datetime.now() > timer.replace(tzinfo=None):
             raise serializers.ValidationError("Date cannot be in the past.")
         return timer
+
+
+class AddMemberSerializer(serializers.Serializer):
+    # member_id = serializers.CharField(max_length=128)
+    members_id = serializers.ListField(
+        child=serializers.CharField(max_length=128), allow_empty=False, required=True
+    )
+    room_id = serializers.CharField(max_length=128)
+    room_name = serializers.CharField(max_length=128, required=True)
+    private = serializers.BooleanField(default=True, read_only=True)
+    created_at = serializers.DateTimeField(
+        default=timezone.now, read_only=True)
+    

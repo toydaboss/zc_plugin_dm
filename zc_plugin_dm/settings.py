@@ -28,7 +28,7 @@ SECRET_KEY = str(os.getenv('SECRET_KEY'))
 DEBUG = True  # str(os.getenv('DEBUG'))
 
 
-ALLOWED_HOSTS = ["dm.zuri.chat", "127.0.0.1", "zuri.chat/dm"]
+ALLOWED_HOSTS = ["dm.zuri.chat", "127.0.0.1", "zuri.chat/dm", "localhost"]
 CORS_ALLOW_ALL_ORIGINS = True
 # CORS_ALLOWED_ORIGINS = [
 #     # "https://zuri.chat",
@@ -47,6 +47,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         'rest_framework_simplejwt.authentication.JWTTokenUserAuthentication',
     ],
+
+    'TEST_REQUEST_DEFAULT_FORMAT': 'json'
 }
 
 SIMPLE_JWT = {
@@ -86,6 +88,13 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'zc_plugin_dm.urls'
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': 'database.sqlite'
+    }
+}
 
 TEMPLATES = [
     {

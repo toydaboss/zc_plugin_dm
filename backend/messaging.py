@@ -2,6 +2,7 @@ import json
 from typing import Dict, List
 import uuid
 import re
+from asgiref.sync import sync_to_async
 from django.http import response
 from django.utils.decorators import method_decorator
 from django.http.response import JsonResponse
@@ -20,6 +21,7 @@ from rest_framework.views import (
     exception_handler,
 )
 from django.core.files.storage import default_storage
+
 # Import Read Write function to Zuri Core
 from .resmodels import *
 from .serializers import *
@@ -34,15 +36,13 @@ from queue import LifoQueue
 
 
 @swagger_auto_schema(
-    methods=["post","get"],
+    methods=["post", "get"],
     query_serializer=GetMessageSerializer,
     operation_summary="Creates and get messages",
-   responses={
-            201: MessageResponse,
-            400: "Error: Bad Request"
-        }
+    responses={201: MessageResponse, 400: "Error: Bad Request"},
 )
-@api_view(["GET","POST"])
+@sync_to_async
+@api_view(["GET", "POST"])
 @db_init_with_credentials
 def message_create_get(request, room_id):
     if request.method == "GET":
@@ -51,21 +51,16 @@ def message_create_get(request, room_id):
         date = request.GET.get("date", None)
         params_serializer = GetMessageSerializer(data=request.GET.dict())
         if params_serializer.is_valid():
-            room = DB.read("dm_rooms", {"_id": room_id})
+            room = DB.read_query("dm_rooms", query={"_id": room_id})
             if room:
                 messages = get_room_messages(room_id, DB.organization_id)
                 if date != None:
-                    messages_by_date = get_messages(messages, date)
-                    if messages_by_date == None or "message" in messages_by_date:
-                        return Response(
-                            data="No messages available",
-                            status=status.HTTP_204_NO_CONTENT,
-                        )
-                    else:
-                        messages_page = paginator.paginate_queryset(
-                            messages_by_date, request
-                        )
-                        return paginator.get_paginated_response(messages_page)
+                    messages_by_date = get_messages(room_id,DB.organization_id, date)
+                    
+                    messages_page = paginator.paginate_queryset(
+                            messages_by_date, request)
+                        
+                    return paginator.get_paginated_response(messages_page)
                 else:
                     if messages == None or "message" in messages:
                         return Response(
@@ -77,7 +72,9 @@ def message_create_get(request, room_id):
             else:
                 return Response(data="No such room", status=status.HTTP_404_NOT_FOUND)
         else:
-            return Response(params_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                params_serializer.errors, status=status.HTTP_400_BAD_REQUEST
+            )
 
     elif request.method == "POST":
         request.data["room_id"] = room_id
@@ -88,7 +85,7 @@ def message_create_get(request, room_id):
             data = serializer.data
             room_id = data["room_id"]  # room id gotten from client request
 
-            room = DB.read("dm_rooms", {"_id": room_id})
+            room = DB.read_query("dm_rooms", query={"_id": room_id})
             if room and room.get("status_code", None) == None:
                 if data["sender_id"] in room.get("room_user_ids", []):
 
@@ -139,7 +136,6 @@ def message_create_get(request, room_id):
         return Response(status=status.HTTP_400_BAD_REQUEST)
 
 
-
 @api_view(["GET", "PUT"])
 @db_init_with_credentials
 def edit_message(request, message_id, room_id):
@@ -167,20 +163,18 @@ def edit_message(request, message_id, room_id):
         room_serializer = MessageSerializer(message, data=request.data, partial=True)
         if room_serializer.is_valid():
             data = room_serializer.data
-            data = {"message":request.data["message"]}
+            data = {"message": request.data["message"]}
             # print(data)
             response = DB.update("dm_messages", message_id, data)
             if response.get("status") == 200:
                 data = {
-                        "sender_id":request.data["sender_id"],
-                        "message_id":message_id,
-                        "room_id":room_id,
-                        "message":request.data["message"],
-                        "event":"edited_message"
-                        }
-                centrifugo_data = send_centrifugo_data(
-                    room=room_id, data=data
-                )
+                    "sender_id": request.data["sender_id"],
+                    "message_id": message_id,
+                    "room_id": room_id,
+                    "message": request.data["message"],
+                    "event": "edited_message",
+                }
+                centrifugo_data = send_centrifugo_data(room=room_id, data=data)
                 if centrifugo_data.get("error", None) == None:
                     return Response(data=data, status=status.HTTP_201_CREATED)
                 return Response(data)
@@ -190,34 +184,71 @@ def edit_message(request, message_id, room_id):
 @swagger_auto_schema(
     methods=["delete"],
     operation_summary="Deletes messages from rooms",
-    request_body=DeleteMessageSerializer,
     responses={400: "Error: Bad Request"},
 )
 @api_view(["DELETE"])
 @db_init_with_credentials
 def delete_message(request, message_id, room_id):
     """
-    This function deletes message in rooms using message
-    organization id (org_id), room id (room_id) and the message id (message_id).
+    Deletes a message from a room.
+
+    It access room with the 'room_id' and the message in the room with 'message_id' and then deletes the message if it exists.
+    The id of the organization (org_id) where the room is located is also needed.
+
+    Parameters:
+        org_id (str)        : This is the id of the organization th user belongs to.
+
+        room_id (str)       : This is the unique id of the room the message to be deleted is in.
+
+        message_id (str)    : This is the unique id of the message to be deleted from a given room.
+    
+    Returns:
+        A dict object indicating the the message has been deleted. Example:
+        {
+            "status"        : "success",
+            "event"         : "message_delete",
+            "room_id"       : "6169dbcef5998a09e3bbbcd3",
+            "message_id"    : "616ad4f989454c2006018af2"
+        }
+
+    Raises:
+        Not Found: If there is no message with specified id in the specified room, it returns 'message not found' and a '404' error message.
+
+        IOError: An error occurred while deleteing the message.
     """
-    message_id = request.GET.get("message_id")
-    room_id = request.GET.get("room_id")
+
     if request.method == "DELETE":
         try:
-            message = DB.read("dm_messages", {"_id": message_id})
-            room = DB.read("dm_rooms", {"_id": room_id})
+            # Sends a get request to the database to fetch the message and the room of the message from.
+            message = DB.read("dm_messages", {"_id": message_id, "room_id": room_id})
 
-            if room and message:
-                response = DB.delete("dm_messages", {"_id": message_id})
-                centrifugo_data = centrifugo_client.publish(
-                    message=message_id, data=response
-                )
-                if centrifugo_data and centrifugo_data.status_code == 200:
-                    return Response(response, status=status.HTTP_200_OK)
+            # Checks if the room exists and if the message exists in the room. 
+            # If this returns true, the message is deleted. Else an error message is returned.
+            if message:
+                response = DB.delete("dm_messages", message_id)
+                # if the delete operation was successful, it returns a success message.
+                if response.get("status") == 200:
+                    response_output = {
+                        "status": response["message"],
+                        "event": "message_delete",
+                        "room_id": room_id,
+                        "message_id": message_id,
+                    }
+                    # This publishes the operation across all active devices in the room where the operation was performed.
+                    centrifugo_data = centrifugo_client.publish(
+                        room=room_id, data=response
+                    )
+                    # Checks if the publish was successful and returns a success message if True, else an error message is returned.
+                    if centrifugo_data and centrifugo_data.get("status_code") == 200:
+                        return Response(response_output, status=status.HTTP_200_OK)
+                    return Response(
+                        data="message not sent",
+                        status=status.HTTP_424_FAILED_DEPENDENCY,
+                    )
             return Response("message not found", status=status.HTTP_404_NOT_FOUND)
-        except exception_handler as e:
+        except Exception as e:
+            # All exeptions are caught are returned here...
             return Response(str(e), status=status.HTTP_400_BAD_REQUEST)
-
 
 
 @swagger_auto_schema(
@@ -267,7 +298,6 @@ def scheduled_messages(request, room_id):
     return Response(response.json(), status=response.status_code)
 
 
-
 @swagger_auto_schema(
     methods=["put"],
     operation_summary="Marks a message as read or unread",
@@ -298,7 +328,6 @@ def mark_read(request, message_id):
     if response.get("status") == 200:
         return Response(data=data, status=status.HTTP_200_OK)
     return Response(status=status.HTTP_400_BAD_REQUEST)
-
 
 
 @swagger_auto_schema(
@@ -334,7 +363,11 @@ def pinned_message(request, message_id):
         return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
     if message_id in pin:
         pin.remove(message_id)
-        data = {"message_id": message_id, "pinned": pin, "Event": "unpin_message"} # this event key is in capslock
+        data = {
+            "message_id": message_id,
+            "pinned": pin,
+            "Event": "unpin_message",
+        }  # this event key is in capslock
         response = DB.update("dm_rooms", room_id, {"pinned": pin})
         # room = DB.read("dm_rooms", {"id": room_id})
         if response["status"] == 200:
@@ -355,3 +388,37 @@ def pinned_message(request, message_id):
         )  # publish data to centrifugo
         if centrifugo_data.get("error", None) == None:
             return Response(data=data, status=status.HTTP_201_CREATED)
+
+
+@swagger_auto_schema(
+    methods=["get"],
+    operation_summary="Returns all messages in the dm collection",
+    responses={
+        200: "success",
+        424: "Failed Dependency"
+    },
+)
+@api_view(["GET"])
+@db_init_with_credentials
+def all_messages(request):
+    """This endpoint is used to get all the messages in the dm_messages collection. 
+    Also returns a messages with the read and unread status"""
+    
+    res = DB.read("dm_messages")
+    if res and "status_code" not in res:
+        all_messages = res
+        read_messages = [message for message in all_messages if message["read"] == "true"]
+        print(read_messages)
+        unread_messages = [message for message in all_messages if message["read"] == "false"]
+        message_data = {
+            "all_messages": all_messages,
+            "read_messages": read_messages,
+            "unread_messages":unread_messages
+        }
+        return Response(message_data, status=status.HTTP_200_OK)
+
+    else:
+        return Response(f"something went wrong. message collection returned{res}",
+                        status=status.HTTP_424_FAILED_DEPENDENCY)
+
+    
